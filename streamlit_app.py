@@ -6,7 +6,7 @@ from io import BytesIO
 from matplotlib.ticker import FuncFormatter
 
 # ===========================
-# CONFIGURAÇÃO E PALETA
+# CONFIG E PALETA
 # ===========================
 st.set_page_config(page_title="Elasticidade – Perfis (R$1.000 a R$3.000)", layout="wide")
 
@@ -25,36 +25,31 @@ def fmt_moeda(x, pos):
     return f"R${int(x):,}".replace(",", ".")
 
 # ===========================
-# CABEÇALHO (TEXTO INSTITUCIONAL)
+# CABEÇALHO
 # ===========================
 st.title("📊 Elasticidade por Perfil – Faixa de Preços Alta (R$ 1.000 a R$ 3.000)")
 st.markdown(
     """
-**Propósito.** Este painel ilustra, de forma objetiva, como diferentes **perfis de consumidores** reagem a variações de **preços elevados**.
-Para cada perfil, modelamos a demanda por uma função linear baseada em um **preço máximo tolerado (P\*)**:
+**Propósito.** Este painel ilustra como diferentes **perfis de consumidores** reagem a variações de **preços elevados**.
+Usamos uma função com **preço máximo tolerado (P\*)**, onde cada perfil deixa de comprar acima do seu P\*:
 
-- **Estudante**: maior sensibilidade a preço → **P\*** mais baixo (desiste primeiro).  
-- **Família**: sensibilidade intermediária → **P\*** mediano.  
-- **Empresa**: menor sensibilidade a preço → **P\*** mais alto (desiste por último).
+- **Estudante**: maior sensibilidade → **P\*** mais baixo (desiste primeiro)  
+- **Família**: sensibilidade intermediária → **P\*** mediano  
+- **Empresa**: menor sensibilidade → **P\*** mais alto (desiste por último)
 
-A leitura é direta: para um preço corrente \(P\), observamos a **quantidade demandada \(Q\)** de cada perfil e sua **elasticidade pontual**.
+Para um preço corrente \(P\), mostramos a **quantidade demandada \(Q\)** e a **elasticidade pontual** de cada perfil.
 """
 )
 
 # ===========================
-# CONTROLES – BARRA LATERAL
+# CONTROLES
 # ===========================
 st.sidebar.header("⚙️ Parâmetros do experimento")
 
-# Preço do produto (alta faixa)
 preco = st.sidebar.slider("💰 Preço do produto (R$)", min_value=1000, max_value=3000, value=1800, step=50)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🎯 Perfis e preços máximos tolerados (P*)")
-
-# Escolhemos uma formulação didática: Q(P) = a * (1 - P/P*) para P <= P*, e 0 acima.
-# Assim, a curva zera exatamente em P* (clareza institucional) e mantém a interpretação “desiste a partir de P*”.
-# a representa a quantidade potencial no preço zero (Q(0)).
 
 with st.sidebar.expander("👩‍🎓 Estudante (sensível) – desiste cedo", True):
     a_est = st.number_input("Q(0)=a – Estudante", min_value=10.0, value=80.0, step=5.0)
@@ -81,22 +76,31 @@ if st.sidebar.button("↺ Restaurar padrões"):
 # MODELO E MÉTRICAS
 # ===========================
 def Q_linear_a_pstar(a, pstar, p):
-    """Q(P) = a * (1 - P/P*), para P <= P*; 0 para P > P*."""
-    p = np.asarray(p, dtype=float)
-    q = a * (1 - p / pstar)
-    q[p > pstar] = 0.0
-    return np.maximum(0.0, q)
+    """
+    Q(P) = a * (1 - P/P*), para P <= P*; 0 para P > P*.
+    Robusta a escalar (float/int) e array.
+    """
+    p_arr = np.asarray(p, dtype=float)
+    q = a * (1 - p_arr / pstar)
+    if p_arr.ndim == 0:  # escalar
+        return float(max(0.0, q))
+    # array
+    q[p_arr > pstar] = 0.0
+    q = np.maximum(0.0, q)
+    return q
 
 def elasticidade_pontual(a, pstar, p):
     """
     Para Q = a * (1 - P/P*), dQ/dP = -a/P*
-    Elasticidade pontual: E = (dQ/dP)*(P/Q) = (-a/P*) * (P / Q)
-    Se Q=0 → E indefinida (None).
+    E = (dQ/dP)*(P/Q) = (-a/P*) * (P / Q)
+    Retorna None quando Q=0.
     """
     q = Q_linear_a_pstar(a, pstar, p)
-    if q <= 0:
+    # garantir escalar para o teste
+    q_val = float(q) if np.ndim(q) == 0 else float(np.asarray(q))
+    if q_val <= 0:
         return None
-    return (-a / pstar) * (p / q)
+    return (-a / pstar) * (p / q_val)
 
 perfis = {
     "Estudante": {"a": a_est, "pstar": pstar_est, "cor": COL_EST},
@@ -104,13 +108,12 @@ perfis = {
     "Empresa":   {"a": a_emp, "pstar": pstar_emp, "cor": COL_EMP},
 }
 
-# Métricas no preço atual
 linhas = []
 for nome, cfg in perfis.items():
     a, pstar, cor = cfg["a"], cfg["pstar"], cfg["cor"]
-    q_atual = float(Q_linear_a_pstar(a, pstar, preco))
+    q_atual = Q_linear_a_pstar(a, pstar, preco)   # agora funciona com escalar
     E = elasticidade_pontual(a, pstar, preco)
-    linhas.append((nome, a, pstar, q_atual, E, cor))
+    linhas.append((nome, a, pstar, float(q_atual), E, cor))
 
 def classif(E):
     if E is None: return "sem demanda"
@@ -120,7 +123,7 @@ def classif(E):
     return "unitária (=1)"
 
 # ===========================
-# CARDS RESUMO
+# CARDS
 # ===========================
 st.markdown("### Resultados no preço atual")
 c1, c2, c3 = st.columns(3)
@@ -160,7 +163,7 @@ for col, (nome, a, pstar, q, E, cor) in zip([c1, c2, c3], linhas):
 st.info(f"Preço selecionado: **R$ {preco:,}**".replace(",", "."))
 
 # ===========================
-# GRÁFICO – CURVAS PRECISAS (1.000 a 3.000)
+# GRÁFICO
 # ===========================
 P = np.linspace(1000, 3000, 1200)
 
@@ -170,23 +173,21 @@ ax.set_facecolor(COL_AX_DARK)
 
 for (nome, a, pstar, q_atual, E, cor) in linhas:
     q_curve = Q_linear_a_pstar(a, pstar, P)
-    # Parte viável (P<=P*): sólida / acima disso não há demanda, não desenhamos
-    mask = P <= pstar
+    mask = P <= pstar                       # parte viável apenas
     ax.plot(P[mask], q_curve[mask], color=cor, linewidth=2.6, label=f"{nome}")
-    # Interceptos
-    ax.scatter([1000], [Q_linear_a_pstar(a, pstar, 1000)], color=cor, s=40, zorder=4)  # Q no limite inferior
+    # intercepto no P* (zeração)
     ax.scatter([pstar], [0], color=cor, s=40, zorder=4)
     ax.text(pstar, 0 + a*0.04, f"P*={int(pstar)}", color=COL_LABEL, ha="center",
             bbox=dict(facecolor=COL_BG_DARK, alpha=0.65, edgecolor="none", pad=1.5), fontsize=10)
-    # Ponto no preço atual
+    # ponto no preço atual
     ax.scatter([preco], [q_atual], color=cor, s=70, zorder=5)
     ax.text(preco, q_atual + a*0.04, f"{q_atual:.1f}", color=COL_LABEL, ha="center",
             bbox=dict(facecolor=COL_BG_DARK, alpha=0.65, edgecolor="none", pad=1.5), fontsize=10)
 
-# Linha vertical do preço atual
+# linha do preço atual
 ax.axvline(preco, color=COL_PRICE, linestyle="--", linewidth=1.5, label="Preço selecionado")
 
-# Estilo e eixos
+# estilo
 ax.grid(color=COL_GRID, linestyle=":", linewidth=0.8, alpha=0.7)
 ax.set_xlabel("Preço (R$)", color=COL_LABEL)
 ax.set_ylabel("Quantidade Demandada", color=COL_LABEL)
@@ -194,18 +195,16 @@ ax.set_title("Curvas por Perfil (modelo com preço máximo tolerado P*)", color=
 ax.tick_params(colors=COL_LABEL)
 ax.xaxis.set_major_formatter(FuncFormatter(fmt_moeda))
 
-# Limites
 ax.set_xlim(1000, 3000)
 ax.set_ylim(0, max(a_est, a_fam, a_emp) * 1.22)
 
-# Legenda
 leg = ax.legend(facecolor="#1a1f2e", edgecolor="#2a3146")
 for t in leg.get_texts():
     t.set_color("#e6e6e6")
 
 st.pyplot(fig, use_container_width=True)
 
-# Download
+# download do gráfico
 buf = BytesIO()
 fig.savefig(buf, format="png", dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
 st.download_button("⤓ Baixar gráfico (PNG)", data=buf.getvalue(),
@@ -226,14 +225,13 @@ df = pd.DataFrame([{
 st.dataframe(df, use_container_width=True)
 
 # ===========================
-# NOTA INSTITUCIONAL
+# NOTA METODOLÓGICA
 # ===========================
 with st.expander("Nota metodológica"):
     st.markdown(
         """
-- **Formulação:** para cada perfil, adotamos \( Q(P) = a \cdot (1 - P/P^*) \) até \(P = P^*\); acima disso, \(Q=0\).
-  Isso garante: (i) **interpretação direta de P\*** como o preço limite do perfil; (ii) **comparabilidade** entre perfis; (iii) visual limpo.
-- **Leitura:** valores maiores de \(P^*\) denotam **maior tolerância a preço** (demanda menos sensível).
-- **Elasticidade:** a métrica exibida é a **pontual** no **preço atual** \(P\), útil para discussão de **política de preços** por segmento.
+- **Formulação:** \( Q(P) = a \cdot (1 - P/P^*) \) até \(P = P^*\); acima disso, \(Q=0\).
+- **Interpretação:** \(P^*\) é o **limite de tolerância a preço** do perfil (quanto maior, menos sensível).
+- **Elasticidade:** exibimos a **pontual** no preço atual \(P\) (guia para decisões de preço por segmento).
 """
     )

@@ -1,202 +1,189 @@
 import streamlit as st
 import matplotlib.pyplot as plt
-import pandas as pd
 import numpy as np
+import pandas as pd
 from io import BytesIO
 from matplotlib.ticker import FuncFormatter
 
 # ===========================
-# CONFIG E PALETA
+# Config & paleta
 # ===========================
-st.set_page_config(page_title="Elasticidade – Perfis (R$1.000 a R$3.000)", layout="wide")
+st.set_page_config(page_title="Elasticidade por Perfil (R$ 1.000–3.000)", layout="wide")
 
 COL_BG_DARK   = "#0f1116"
 COL_AX_DARK   = "#0f1116"
-COL_GRID      = "#2a3146"
-COL_LABEL     = "#cfd6e6"
+COL_GRID      = "#283046"
+COL_LABEL     = "#dbe2f1"
 COL_TITLE     = "#ffffff"
-COL_PRICE     = "#c33d3d"
+COL_PRICE     = "#ff6b6b"
 
-COL_EST = "#f7b500"  # Estudante
-COL_EMP = "#3aa0ff"  # Empresa
-COL_FAM = "#38d39f"  # Família
+COL_EST = "#f7b500"  # estudante
+COL_FAM = "#38d39f"  # família
+COL_EMP = "#3aa0ff"  # empresa
+
+# tons suaves (faixas)
+BAND_EST = "#f7b5001a"
+BAND_FAM = "#38d39f1a"
+BAND_EMP = "#3aa0ff1a"
 
 def fmt_moeda(x, pos):
     return f"R${int(x):,}".replace(",", ".")
 
 # ===========================
-# CABEÇALHO
+# Cabeçalho
 # ===========================
-st.title("📊 Elasticidade por Perfil – Faixa de Preços Alta (R$ 1.000 a R$ 3.000)")
-st.markdown(
-    """
-**Propósito.** Este painel ilustra como diferentes **perfis de consumidores** reagem a variações de **preços elevados**.
-Usamos uma função com **preço máximo tolerado (P\*)**, onde cada perfil deixa de comprar acima do seu P\*:
+st.title("📊 Elasticidade por Perfil — Faixa Alta de Preços (R$ 1.000 a R$ 3.000)")
+st.markdown("""
+**Leitura rápida.** Cada perfil tem um **preço máximo tolerado (P\*)**:
+- **Estudante** desiste primeiro (P\* mais baixo),
+- **Família** aguenta mais (P\* intermediário),
+- **Empresa** é a menos sensível (P\* mais alto).
 
-- **Estudante**: maior sensibilidade → **P\*** mais baixo (desiste primeiro)  
-- **Família**: sensibilidade intermediária → **P\*** mediano  
-- **Empresa**: menor sensibilidade → **P\*** mais alto (desiste por último)
-
-Para um preço corrente \(P\), mostramos a **quantidade demandada \(Q\)** e a **elasticidade pontual** de cada perfil.
-"""
-)
+O gráfico mostra **apenas** a parte onde cada perfil **ainda compra**. Acima de P\*, a quantidade vira **0**.
+""")
 
 # ===========================
-# CONTROLES
+# Controles (sidebar)
 # ===========================
 st.sidebar.header("⚙️ Parâmetros do experimento")
 
-preco = st.sidebar.slider("💰 Preço do produto (R$)", min_value=1000, max_value=3000, value=1800, step=50)
+preco = st.sidebar.slider("💰 Preço do produto (R$)", 1000, 3000, 1800, 50)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🎯 Perfis e preços máximos tolerados (P*)")
+st.sidebar.subheader("🎯 Perfis e seus P* (preço máximo tolerado)")
 
-with st.sidebar.expander("👩‍🎓 Estudante (sensível) – desiste cedo", True):
-    a_est = st.number_input("Q(0)=a – Estudante", min_value=10.0, value=80.0, step=5.0)
-    pstar_est = st.number_input("P* (máximo tolerado) – Estudante (R$)", min_value=1000, max_value=3000, value=1200, step=50)
+with st.sidebar.expander("👩‍🎓 Estudante (sensível) — desiste cedo", True):
+    a_est   = st.number_input("Q(0)=a — Estudante", value=80.0, min_value=10.0, step=5.0)
+    pstar_est = st.number_input("P* — Estudante (R$)", value=1200, min_value=1000, max_value=3000, step=50)
 
-with st.sidebar.expander("👨‍👩‍👧 Família (médio) – desiste depois", True):
-    a_fam = st.number_input("Q(0)=a – Família", min_value=10.0, value=70.0, step=5.0)
-    pstar_fam = st.number_input("P* (máximo tolerado) – Família (R$)", min_value=1000, max_value=3000, value=2200, step=50)
+with st.sidebar.expander("👨‍👩‍👧 Família (médio) — desiste depois", True):
+    a_fam   = st.number_input("Q(0)=a — Família", value=70.0, min_value=10.0, step=5.0)
+    pstar_fam = st.number_input("P* — Família (R$)", value=2200, min_value=1000, max_value=3000, step=50)
 
-with st.sidebar.expander("🏢 Empresa (pouco sensível) – desiste por último", True):
-    a_emp = st.number_input("Q(0)=a – Empresa", min_value=10.0, value=65.0, step=5.0)
-    pstar_emp = st.number_input("P* (máximo tolerado) – Empresa (R$)", min_value=1000, max_value=3000, value=3000, step=50)
+with st.sidebar.expander("🏢 Empresa (pouco sensível) — desiste por último", True):
+    a_emp   = st.number_input("Q(0)=a — Empresa", value=65.0, min_value=10.0, step=5.0)
+    pstar_emp = st.number_input("P* — Empresa (R$)", value=3000, min_value=1000, max_value=3000, step=50)
 
-def reset():
-    st.session_state["a_est"], st.session_state["pstar_est"] = 80.0, 1200
-    st.session_state["a_fam"], st.session_state["pstar_fam"] = 70.0, 2200
-    st.session_state["a_emp"], st.session_state["pstar_emp"] = 65.0, 3000
+def Q_a_pstar(a, pstar, p):
+    """Q(P) = a*(1 - P/P*) para P<=P*; 0 acima de P*."""
+    p = np.asarray(p, dtype=float)
+    q = a * (1 - p / pstar)
+    q[p > pstar] = 0.0
+    return np.maximum(0.0, q)
 
-if st.sidebar.button("↺ Restaurar padrões"):
-    reset()
-    st.experimental_rerun()
-
-# ===========================
-# MODELO E MÉTRICAS
-# ===========================
-def Q_linear_a_pstar(a, pstar, p):
-    """
-    Q(P) = a * (1 - P/P*), para P <= P*; 0 para P > P*.
-    Robusta a escalar (float/int) e array.
-    """
-    p_arr = np.asarray(p, dtype=float)
-    q = a * (1 - p_arr / pstar)
-    if p_arr.ndim == 0:  # escalar
-        return float(max(0.0, q))
-    # array
-    q[p_arr > pstar] = 0.0
-    q = np.maximum(0.0, q)
-    return q
-
-def elasticidade_pontual(a, pstar, p):
-    """
-    Para Q = a * (1 - P/P*), dQ/dP = -a/P*
-    E = (dQ/dP)*(P/Q) = (-a/P*) * (P / Q)
-    Retorna None quando Q=0.
-    """
-    q = Q_linear_a_pstar(a, pstar, p)
-    # garantir escalar para o teste
-    q_val = float(q) if np.ndim(q) == 0 else float(np.asarray(q))
-    if q_val <= 0:
+def E_a_pstar(a, pstar, p):
+    """Elasticidade pontual de Q = a(1 - P/P*): dQ/dP = -a/P*; E = (-a/P*)*(P/Q)."""
+    q = float(Q_a_pstar(a, pstar, p))
+    if q <= 0:
         return None
-    return (-a / pstar) * (p / q_val)
+    return (-a / pstar) * (p / q)
 
-perfis = {
-    "Estudante": {"a": a_est, "pstar": pstar_est, "cor": COL_EST},
-    "Família":   {"a": a_fam, "pstar": pstar_fam, "cor": COL_FAM},
-    "Empresa":   {"a": a_emp, "pstar": pstar_emp, "cor": COL_EMP},
-}
+perfis = [
+    ("Estudante", a_est, pstar_est, COL_EST, BAND_EST),
+    ("Família",   a_fam, pstar_fam, COL_FAM, BAND_FAM),
+    ("Empresa",   a_emp, pstar_emp, COL_EMP, BAND_EMP),
+]
 
-linhas = []
-for nome, cfg in perfis.items():
-    a, pstar, cor = cfg["a"], cfg["pstar"], cfg["cor"]
-    q_atual = Q_linear_a_pstar(a, pstar, preco)   # agora funciona com escalar
-    E = elasticidade_pontual(a, pstar, preco)
-    linhas.append((nome, a, pstar, float(q_atual), E, cor))
-
-def classif(E):
-    if E is None: return "sem demanda"
-    v = abs(E)
-    if v > 1: return "elástica (>1)"
-    if v < 1: return "inelástica (<1)"
-    return "unitária (=1)"
-
-# ===========================
-# CARDS
-# ===========================
+# cards
 st.markdown("### Resultados no preço atual")
 c1, c2, c3 = st.columns(3)
-for col, (nome, a, pstar, q, E, cor) in zip([c1, c2, c3], linhas):
-    with col:
-        st.markdown(
-            f"""
+for col, (nome, a, pstar, cor, _) in zip([c1,c2,c3], perfis):
+    q = float(Q_a_pstar(a, pstar, preco))
+    E = E_a_pstar(a, pstar, preco)
+    cls = "sem demanda" if E is None else ("elástica (>1)" if abs(E) > 1 else ("unitária (=1)" if abs(E)==1 else "inelástica (<1)"))
+    col.markdown(
+f"""
 <div style="background:#f7f9fc;border:1px solid #e5eaf1;border-radius:14px;padding:14px 16px;">
   <div style="font-weight:700;color:#111827;font-size:16px;">{nome}</div>
   <div style="display:flex;gap:18px;margin-top:8px;flex-wrap:wrap;">
-    <div>
-      <div style="font-size:12px;color:#6b7280;">Q(0)=a</div>
-      <div style="font-size:18px;font-weight:700;color:#111827;">{a:.0f}</div>
-    </div>
-    <div>
-      <div style="font-size:12px;color:#6b7280;">P*</div>
-      <div style="font-size:18px;font-weight:700;color:#111827;">R${int(pstar):,}</div>
-    </div>
-    <div>
-      <div style="font-size:12px;color:#6b7280;">Q no preço</div>
-      <div style="font-size:22px;font-weight:700;color:#111827;">{q:.1f}</div>
-    </div>
-    <div>
-      <div style="font-size:12px;color:#6b7280;">|E|</div>
-      <div style="font-size:18px;font-weight:700;color:#111827;">{"-" if E is None else f"{abs(E):.2f}"}</div>
-    </div>
-    <div>
-      <div style="font-size:12px;color:#6b7280;">Classe</div>
-      <div style="font-size:14px;font-weight:700;color:{cor};">{classif(E)}</div>
-    </div>
+    <div><div style="font-size:12px;color:#6b7280;">Q(0)=a</div>
+    <div style="font-size:18px;font-weight:700;color:#111827;">{a:.0f}</div></div>
+
+    <div><div style="font-size:12px;color:#6b7280;">P*</div>
+    <div style="font-size:18px;font-weight:700;color:#111827;">R${pstar:,}</div></div>
+
+    <div><div style="font-size:12px;color:#6b7280;">Q no preço</div>
+    <div style="font-size:22px;font-weight:700;color:#111827;">{q:.1f}</div></div>
+
+    <div><div style="font-size:12px;color:#6b7280;">|E|</div>
+    <div style="font-size:18px;font-weight:700;color:#111827;">{"-" if E is None else f"{abs(E):.2f}"}</div></div>
+
+    <div><div style="font-size:12px;color:#6b7280;">Classe</div>
+    <div style="font-size:14px;font-weight:700;color:{cor};">{cls}</div></div>
   </div>
 </div>
-""".replace(",", "."),
-            unsafe_allow_html=True
-        )
+""".replace(",", "."), unsafe_allow_html=True)
 
 st.info(f"Preço selecionado: **R$ {preco:,}**".replace(",", "."))
 
 # ===========================
-# GRÁFICO
+# GRÁFICO – versão didática com faixas
 # ===========================
 P = np.linspace(1000, 3000, 1200)
 
-fig, ax = plt.subplots(figsize=(10, 5.6))
+# ordenar P* para criar bandas na ordem correta
+sorted_pstars = sorted([(pstar_est, "Estudante", BAND_EST),
+                        (pstar_fam, "Família",   BAND_FAM),
+                        (pstar_emp, "Empresa",   BAND_EMP)],
+                       key=lambda x: x[0])
+
+fig, ax = plt.subplots(figsize=(10.5, 6.2))
 fig.patch.set_facecolor(COL_BG_DARK)
 ax.set_facecolor(COL_AX_DARK)
 
-for (nome, a, pstar, q_atual, E, cor) in linhas:
-    q_curve = Q_linear_a_pstar(a, pstar, P)
-    mask = P <= pstar                       # parte viável apenas
-    ax.plot(P[mask], q_curve[mask], color=cor, linewidth=2.6, label=f"{nome}")
-    # intercepto no P* (zeração)
-    ax.scatter([pstar], [0], color=cor, s=40, zorder=4)
-    ax.text(pstar, 0 + a*0.04, f"P*={int(pstar)}", color=COL_LABEL, ha="center",
-            bbox=dict(facecolor=COL_BG_DARK, alpha=0.65, edgecolor="none", pad=1.5), fontsize=10)
-    # ponto no preço atual
-    ax.scatter([preco], [q_atual], color=cor, s=70, zorder=5)
-    ax.text(preco, q_atual + a*0.04, f"{q_atual:.1f}", color=COL_LABEL, ha="center",
-            bbox=dict(facecolor=COL_BG_DARK, alpha=0.65, edgecolor="none", pad=1.5), fontsize=10)
+# 1) FAIXAS DE CONTEXTO (onde cada perfil ainda compra)
+x_left = 1000
+for pstar, label, band_col in sorted_pstars:
+    ax.axvspan(x_left, pstar, color=band_col, ymin=0, ymax=1)
+    # rótulo da faixa
+    cx = (x_left + pstar) / 2
+    ax.text(cx, 0.95, f"Até aqui {label} compra",
+            color=COL_LABEL, ha="center", va="top", fontsize=10,
+            bbox=dict(facecolor="#00000055", edgecolor="none", pad=2))
+    x_left = pstar
+# após maior P*, “ninguém compra”
+if x_left < 3000:
+    ax.axvspan(x_left, 3000, color="#ff6b6b10", ymin=0, ymax=1)
+    cx = (x_left + 3000) / 2
+    ax.text(cx, 0.95, "Acima do maior P*: ninguém compra",
+            color="#ffb3b3", ha="center", va="top", fontsize=10,
+            bbox=dict(facecolor="#00000055", edgecolor="none", pad=2))
 
-# linha do preço atual
-ax.axvline(preco, color=COL_PRICE, linestyle="--", linewidth=1.5, label="Preço selecionado")
+# 2) CURVAS (somente trecho com Q>0)
+for nome, a, pstar, cor, _band in perfis:
+    q_curve = Q_a_pstar(a, pstar, P)
+    mask = P <= pstar
+    ax.plot(P[mask], q_curve[mask], color=cor, linewidth=3, label=nome)
+    # intercepto em P*
+    ax.scatter([pstar], [0], color=cor, s=50, zorder=5)
+    ax.text(pstar, max(a*0.05, 1), f"P*={pstar}",
+            color=COL_LABEL, ha="center", va="bottom", fontsize=10,
+            bbox=dict(facecolor="#00000070", edgecolor="none", pad=2))
 
-# estilo
-ax.grid(color=COL_GRID, linestyle=":", linewidth=0.8, alpha=0.7)
-ax.set_xlabel("Preço (R$)", color=COL_LABEL)
-ax.set_ylabel("Quantidade Demandada", color=COL_LABEL)
-ax.set_title("Curvas por Perfil (modelo com preço máximo tolerado P*)", color=COL_TITLE, pad=10, fontsize=18)
+# 3) PONTO DO PREÇO ATUAL
+for nome, a, pstar, cor, _ in perfis:
+    q = float(Q_a_pstar(a, pstar, preco))
+    ax.scatter([preco], [q], color=cor, s=110, edgecolor="white", linewidth=1.2, zorder=6)
+    ax.text(preco, q + max(a*0.05, 1.5), f"{q:.1f}",
+            color=COL_LABEL, ha="center", va="bottom", fontsize=10,
+            bbox=dict(facecolor="#00000070", edgecolor="none", pad=2))
+
+# linha vertical do preço atual + label
+ax.axvline(preco, color=COL_PRICE, linestyle=(0,(6,6)), linewidth=2.2)
+ax.text(preco, ax.get_ylim()[1]*0.88, "Preço atual",
+        color="#ffd6d6", ha="center", va="bottom", fontsize=11,
+        bbox=dict(facecolor="#55000080", edgecolor="none", pad=2))
+
+# 4) estilo geral
+ax.grid(color=COL_GRID, linestyle=":", linewidth=0.9, alpha=0.7)
+ax.set_xlim(1000, 3000)
+ax.set_ylim(0, max(a_est, a_fam, a_emp)*1.25)
+
+ax.set_xlabel("Preço (R$)", color=COL_LABEL, labelpad=8)
+ax.set_ylabel("Quantidade Demandada", color=COL_LABEL, labelpad=8)
+ax.set_title("Curvas por Perfil (com P* e zonas de compra por segmento)", color=COL_TITLE, pad=12, fontsize=18)
 ax.tick_params(colors=COL_LABEL)
 ax.xaxis.set_major_formatter(FuncFormatter(fmt_moeda))
-
-ax.set_xlim(1000, 3000)
-ax.set_ylim(0, max(a_est, a_fam, a_emp) * 1.22)
 
 leg = ax.legend(facecolor="#1a1f2e", edgecolor="#2a3146")
 for t in leg.get_texts():
@@ -204,34 +191,38 @@ for t in leg.get_texts():
 
 st.pyplot(fig, use_container_width=True)
 
-# download do gráfico
+# download
 buf = BytesIO()
 fig.savefig(buf, format="png", dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
 st.download_button("⤓ Baixar gráfico (PNG)", data=buf.getvalue(),
-                   file_name="curvas_perfis_alta_faixa.png", mime="image/png")
+                   file_name="perfis_faixa_alta_com_bandas.png", mime="image/png")
 
 # ===========================
-# TABELA
+# Tabela
 # ===========================
-st.markdown("### Tabela (parâmetros e resultados no preço atual)")
-df = pd.DataFrame([{
-    "Perfil": nome,
-    "Q(0)=a": int(a),
-    "P* (R$)": int(pstar),
-    "Q no preço": round(q, 1),
-    "Elasticidade (|E|)": "-" if E is None else f"{abs(E):.2f}",
-    "Classificação": classif(E),
-} for (nome, a, pstar, q, E, _) in linhas])
-st.dataframe(df, use_container_width=True)
+st.markdown("### Tabela — parâmetros e resultados no preço atual")
+rows = []
+for nome, a, pstar, cor, _ in perfis:
+    q = float(Q_a_pstar(a, pstar, preco))
+    E = E_a_pstar(a, pstar, preco)
+    cls = "sem demanda" if E is None else ("elástica (>1)" if abs(E) > 1 else ("unitária (=1)" if abs(E)==1 else "inelástica (<1)"))
+    rows.append({
+        "Perfil": nome,
+        "Q(0)=a": int(a),
+        "P* (R$)": int(pstar),
+        "Q no preço": round(q, 1),
+        "Elasticidade (|E|)": "-" if E is None else f"{abs(E):.2f}",
+        "Classificação": cls
+    })
+st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 # ===========================
-# NOTA METODOLÓGICA
+# Nota metodológica curta
 # ===========================
-with st.expander("Nota metodológica"):
-    st.markdown(
-        """
-- **Formulação:** \( Q(P) = a \cdot (1 - P/P^*) \) até \(P = P^*\); acima disso, \(Q=0\).
-- **Interpretação:** \(P^*\) é o **limite de tolerância a preço** do perfil (quanto maior, menos sensível).
-- **Elasticidade:** exibimos a **pontual** no preço atual \(P\) (guia para decisões de preço por segmento).
-"""
-    )
+with st.expander("Nota metodológica (resumo)"):
+    st.markdown("""
+- Modelo: \(Q(P) = a\,(1 - P/P^*)\) para \(P \le P^*\); acima disso \(Q=0\).
+- \(P^*\) é o **limite de tolerância a preço** do perfil (quanto maior, **menos sensível**).
+- Elasticidade exibida é a **pontual** no preço atual \(P\).
+- Zonas coloridas no gráfico indicam **onde cada perfil ainda compra**.
+""")

@@ -1,6 +1,7 @@
 import streamlit as st
 import matplotlib.pyplot as plt
 import pandas as pd
+import numpy as np
 from io import BytesIO
 
 # ------------------ CONFIG ------------------
@@ -12,6 +13,7 @@ COL_AX_DARK   = "#0f1116"
 COL_GRID      = "#2a3146"
 COL_LABEL     = "#cfd6e6"
 COL_TITLE     = "#ffffff"
+COL_PRICE     = "#c33d3d"
 
 COL_EST = "#f7b500"  # Estudante
 COL_EMP = "#3aa0ff"  # Empresa
@@ -19,7 +21,7 @@ COL_FAM = "#38d39f"  # Família
 
 # ------------------ TÍTULO ------------------
 st.title("📊 Simulador de Elasticidade-Preço da Demanda")
-st.write("Ajuste o **preço** e os parâmetros \(Q=a-bP\) na barra lateral. A visualização mostra **apenas o preço atual**, sem curvas completas.")
+st.write("Ajuste o **preço** e os parâmetros \(Q=a-bP\) na barra lateral. O gráfico mostra as **curvas precisas** por perfil.")
 
 # ------------------ SIDEBAR ------------------
 st.sidebar.header("⚙️ Controles")
@@ -51,12 +53,17 @@ if st.sidebar.button("↺ Restaurar padrões"):
     st.experimental_rerun()
 
 # ------------------ FUNÇÕES ------------------
-def Q(a: float, b: float, p: float) -> float:
-    return max(0.0, a - b * p)
+def Q(a: float, b: float, p):
+    # aceita escalar ou array
+    return np.maximum(0.0, a - b * p)
+
+def Q_raw(a: float, b: float, p):
+    # sem truncar abaixo de zero (pra desenhar trecho inviável)
+    return a - b * p
 
 def E_pontual(a: float, b: float, p: float):
     """Elasticidade-preço pontual: E = (dQ/dP)*(P/Q) = (-b)*(P/Q)"""
-    q = Q(a, b, p)
+    q = max(0.0, a - b * p)
     if q == 0:
         return None
     return -b * (p / q)
@@ -69,6 +76,10 @@ def classif(E):
     if x < 1: return "inelástica (<1)"
     return "unitária (=1)"
 
+def choke_price(a, b):
+    # preço de sufocamento: Q=0 -> a - bP = 0 -> P=a/b
+    return a / b
+
 # ------------------ DADOS NO PREÇO ATUAL ------------------
 perfis = {
     "Estudante": {"a": a_est, "b": b_est, "cor": COL_EST},
@@ -79,25 +90,25 @@ perfis = {
 linhas = []
 for nome, cfg in perfis.items():
     a, b, cor = cfg["a"], cfg["b"], cfg["cor"]
-    q = Q(a, b, preco)
+    q = max(0.0, a - b * preco)
     E = E_pontual(a, b, preco)
-    linhas.append((nome, q, E, cor, a, b))
+    linhas.append((nome, q, E, cor, a, b, choke_price(a,b)))
 
 # ------------------ CARDS (DESTAQUES) ------------------
 st.markdown("### Resultados no preço atual")
 c1, c2, c3 = st.columns(3)
 cards = [c1, c2, c3]
-for col, (nome, q, E, cor, a, b) in zip(cards, linhas):
+for col, (nome, q, E, cor, a, b, cp) in zip(cards, linhas):
     with col:
         box = f"""
         <div style="
             background:#f7f9fc; border:1px solid #e5eaf1; border-radius:14px;
             padding:14px 16px;">
             <div style="font-weight:700; color:#111827; font-size:16px;">{nome}</div>
-            <div style="display:flex; gap:18px; margin-top:8px;">
+            <div style="display:flex; gap:18px; margin-top:8px; flex-wrap:wrap;">
                 <div>
                     <div style="font-size:12px; color:#6b7280;">Quantidade</div>
-                    <div style="font-size:22px; font-weight:700; color:#111827;">{int(q)}</div>
+                    <div style="font-size:22px; font-weight:700; color:#111827;">{q:.1f}</div>
                 </div>
                 <div>
                     <div style="font-size:12px; color:#6b7280;">|E|</div>
@@ -107,6 +118,10 @@ for col, (nome, q, E, cor, a, b) in zip(cards, linhas):
                     <div style="font-size:12px; color:#6b7280;">Classe</div>
                     <div style="font-size:14px; font-weight:700; color:{cor};">{classif(E)}</div>
                 </div>
+                <div>
+                    <div style="font-size:12px; color:#6b7280;">Interceptos</div>
+                    <div style="font-size:13px; color:#111827;">Q(0)=<b>{a:.1f}</b> • P*=<b>{cp:.1f}</b></div>
+                </div>
             </div>
         </div>
         """
@@ -114,55 +129,91 @@ for col, (nome, q, E, cor, a, b) in zip(cards, linhas):
 
 st.info(f"Preço selecionado: **R$ {preco}**")
 
-# ------------------ GRÁFICO DE BARRAS (SEM CURVA) ------------------
-labels = [n for n, *_ in linhas]
-qs = [q for _, q, *_ in linhas]
-colors = [c for *_, c, __, ___ in linhas]
+# ------------------ GRÁFICO DE CURVAS PRECISAS ------------------
+# Construir domínio dinâmico de P (pega do mínimo 0 até o maior choke price ou 110% do preço atual)
+min_p = 0
+max_cp = max(choke_price(a,b) for _,_,_,_,a,b,_ in linhas)
+max_p = max(max(100, preco*1.1), max_cp*1.05)  # estica um pouco pra ver interceptos
+P = np.linspace(min_p, max_p, 1000)
 
-fig, ax = plt.subplots(figsize=(9.5, 5.2))
+fig, ax = plt.subplots(figsize=(9.8, 5.6))
 fig.patch.set_facecolor(COL_BG_DARK)
 ax.set_facecolor(COL_AX_DARK)
 
-bars = ax.bar(labels, qs, color=colors)
-ax.grid(axis="y", color=COL_GRID, linestyle=":", linewidth=0.8, alpha=0.7)
+for (nome, q_atual, E, cor, a, b, cp) in linhas:
+    # trecho inviável (Q<0): desenha pontilhado e opaco
+    Q_raw_vals = Q_raw(a, b, P)
+    mask_pos = Q_raw_vals >= 0
+    # desenha parte negativa (se existir)
+    if np.any(~mask_pos):
+        ax.plot(P[~mask_pos], Q_raw_vals[~mask_pos],
+                color=cor, linewidth=1.3, linestyle=":", alpha=0.35, antialiased=True)
+    # desenha parte viável (Q>=0)
+    ax.plot(P[mask_pos], Q_raw_vals[mask_pos],
+            label=f"Demanda – {nome}", color=cor, linewidth=2.4, antialiased=True)
+    # marcador no ponto (preço atual, Q atual)
+    ax.scatter([preco], [q_atual], color=cor, s=70, zorder=5)
+    # anotação do valor
+    ax.text(preco, q_atual, f"  {q_atual:.1f}", color=COL_LABEL, va="center")
 
-# valores acima das barras
-for rect in bars:
-    height = rect.get_height()
-    ax.text(rect.get_x() + rect.get_width()/2., height + max(qs)*0.02 if max(qs) > 0 else 0.5,
-            f"{int(height)}", ha='center', va='bottom', color=COL_LABEL, fontsize=11)
+# linha vertical do preço atual
+ax.axvline(preco, color=COL_PRICE, linestyle="--", linewidth=1.5, label="Preço selecionado")
 
+# interceptos no gráfico (marquinhas)
+for (nome, q_atual, E, cor, a, b, cp) in linhas:
+    # Q(0)=a
+    ax.scatter([0], [a], color=cor, s=40)
+    ax.text(0, a, f"  Q(0)={a:.1f}", color=COL_LABEL, va="center")
+    # P* = a/b (choke price) no eixo X
+    ax.scatter([cp], [0], color=cor, s=40)
+    ax.text(cp, 0, f"  P*={cp:.1f}", color=COL_LABEL, va="bottom")
+
+# estilização geral
+ax.grid(color=COL_GRID, linestyle=":", linewidth=0.8, alpha=0.7)
+ax.set_xlabel("Preço (R$)", color=COL_LABEL)
 ax.set_ylabel("Quantidade Demandada", color=COL_LABEL)
-ax.set_title("Comparação de Quantidade por Perfil (no preço atual)", color=COL_TITLE, pad=10, fontsize=18)
+ax.set_title("Curvas de Demanda por Perfil (alta resolução, interceptos e ponto atual)",
+             color=COL_TITLE, pad=10, fontsize=18)
 ax.tick_params(colors=COL_LABEL)
-# eixo x labels brancos:
-for tick in ax.get_xticklabels():
-    tick.set_color(COL_LABEL)
+
+# limites dinâmicos Y
+# pega maior Q(0) e ajusta um pouquinho pra cima
+max_q0 = max(a_est, a_emp, a_fam)
+ax.set_ylim(bottom=0, top=max(max_q0*1.15, 10))
+
+# limites X já ajustados no domínio
+ax.set_xlim(left=0, right=max_p)
+
+# legenda
+leg = ax.legend(facecolor="#1a1f2e", edgecolor="#2a3146")
+for text in leg.get_texts():
+    text.set_color("#e6e6e6")
 
 st.pyplot(fig, use_container_width=True)
 
 # ------------------ DOWNLOAD DO GRÁFICO ------------------
 buf = BytesIO()
-fig.savefig(buf, format="png", dpi=200, bbox_inches="tight", facecolor=fig.get_facecolor())
+fig.savefig(buf, format="png", dpi=220, bbox_inches="tight", facecolor=fig.get_facecolor())
 st.download_button("⤓ Baixar gráfico (PNG)", data=buf.getvalue(),
-                   file_name="quantidade_por_perfil.png", mime="image/png")
+                   file_name="curvas_demanda_precisas.png", mime="image/png")
 
 # ------------------ TABELA ------------------
-st.markdown("### Tabela (quantidades, elasticidades e parâmetros)")
+st.markdown("### Tabela (quantidades, elasticidades e parâmetros no preço atual)")
 df = pd.DataFrame([{
     "Perfil": n,
-    "Quantidade": int(q),
+    "Quantidade (Q)": round(q, 1),
     "Elasticidade (|E|)": "-" if E is None else f"{abs(E):.2f}",
     "Classificação": classif(E),
-    "a": round(a, 2),
+    "Q(0)=a": round(a, 2),
+    "P* = a/b": round(cp, 2),
     "b (inclinação)": round(b, 2),
-} for n, q, E, c, a, b in linhas])
+} for n, q, E, c, a, b, cp in linhas])
 st.dataframe(df, use_container_width=True)
 
 # ------------------ EXPLICANDO A IA ------------------
 with st.expander("Como usamos IA generativa neste artefato"):
     st.markdown("""
-- **ChatGPT** gerou e refinou o código em **Python + Streamlit**, incluindo o cálculo de **elasticidade pontual** e a organização visual.
-- Iteramos prompts para: colocar controles na **barra lateral**, criar **cards** de destaque e trocar a visualização para **barras (sem curvas)**.
-- O app final é um **artefato interativo** que conecta teoria (elasticidade) a um cenário pontual de preço.
+- **ChatGPT** gerou e refinou o código em **Python + Streamlit**, incluindo o cálculo de **elasticidade pontual** e a **estilização**.
+- Iteramos prompts para aumentar a **precisão das curvas** (alta resolução), destacar **interceptos** (Q(0) e P*=a/b) e anotar o **ponto atual**.
+- O app final é um **artefato interativo** que conecta teoria à prática, com transparência nos parâmetros e leitura visual rápida.
 """)

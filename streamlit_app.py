@@ -1,24 +1,15 @@
 import streamlit as st
 import matplotlib.pyplot as plt
+import pandas as pd
 
 st.set_page_config(page_title="Simulador de Elasticidade-Preço", layout="wide")
 
-# ======= ESTILO =======
-st.markdown("""
-<style>
-    .main {background-color: #0f1116;}
-    h1, h2, h3, h4, h5, h6, p, label, span, div {color: #e6e6e6 !important;}
-    .metric {background:#1a1f2e; padding:10px 14px; border-radius:10px; border:1px solid #2a3146;}
-    .callout {background:#14202b; padding:10px 14px; border-radius:10px; border:1px solid #233042;}
-</style>
-""", unsafe_allow_html=True)
-
+# ======= TÍTULO E INTRO =======
 st.title("📊 Simulador de Elasticidade-Preço da Demanda (3 perfis)")
-
-st.markdown(
+st.write(
     "Este simulador mostra como **perfis de consumidores** reagem a mudanças no preço, "
-    "com base na **elasticidade-preço da demanda**. Ajuste o preço e veja "
-    "as **quantidades** e **elasticidades** para Estudante, Família e Empresa."
+    "com base na **elasticidade-preço da demanda**. Ajuste o preço e veja as "
+    "**quantidades** e **elasticidades** para Estudante, Família e Empresa."
 )
 
 # ======= PARÂMETROS DOS PERFIS (Q = a - bP) =======
@@ -28,14 +19,8 @@ perfis = {
     "Família":   {"a":  80, "b": 1.2, "cor": "#38d39f"},  # verde
 }
 
-# ======= CONTROLES =======
-col1, col2, col3 = st.columns([2,1,1])
-with col1:
-    preco = st.slider("💰 Preço do produto (R$)", min_value=10, max_value=100, value=25, step=1)
-with col2:
-    st.write("")
-with col3:
-    st.write("")
+# ======= CONTROLE DE PREÇO =======
+preco = st.slider("💰 Preço do produto (R$)", min_value=10, max_value=100, value=25, step=1)
 
 # ======= FUNÇÕES =======
 def quantidade(a, b, p):
@@ -44,8 +29,8 @@ def quantidade(a, b, p):
 def elasticidade_pontual(a, b, p):
     q = quantidade(a, b, p)
     if q == 0:
-        return None  # sem sentido calcular elasticidade em Q=0
-    # Elasticidade pontual de demanda linear: E = (dQ/dP) * (P/Q) = (-b) * (P/Q)
+        return None
+    # E = (dQ/dP)*(P/Q) = (-b)*(P/Q) para demanda linear
     return -b * (p / q)
 
 def classifica_e(E):
@@ -70,35 +55,30 @@ for nome, cfg in perfis.items():
     series[nome] = {"precos": precos, "qs": qs, "q_atual": q_atual, "E": e_atual, "cor": cor}
     linhas_info.append((nome, q_atual, e_atual, cor))
 
-# ======= TEXTO RESUMO =======
+# ======= RESUMO NO TOPO (TEXTO ESCURO PADRÃO) =======
 resumo = " • ".join(
     [f"**{nome}**: Q = **{int(q)}** {'' if E is None else f'| E={E:.2f} ({classifica_e(E)})'}"
      for nome, q, E, _ in linhas_info]
 )
-st.markdown(f"""
-<div class="callout">
-<strong>Preço selecionado:</strong> R$ {preco} &nbsp;&nbsp;|&nbsp;&nbsp; {resumo}
-</div>
-""", unsafe_allow_html=True)
+st.info(f"Preço selecionado: R$ {preco}  |  {resumo}")
 
-# ======= GRÁFICO =======
-fig, ax = plt.subplots(figsize=(8, 5))
+# ======= GRÁFICO (TEMA ESCURO) =======
+fig, ax = plt.subplots(figsize=(9, 5))
 fig.patch.set_facecolor("#0f1116")
 ax.set_facecolor("#0f1116")
 
 for nome, dados in series.items():
     ax.plot(dados["precos"], dados["qs"], label=f"Demanda – {nome}",
             color=dados["cor"], linewidth=2.2)
-    # marcador no ponto (preço, quantidade atual)
     ax.scatter([preco], [dados["q_atual"]], color=dados["cor"], s=60, zorder=5)
 
-# linha vertical do preço e grade leve
-ax.axvline(preco, color="#c33d3d", linestyle="--", linewidth=1.2, label="Preço selecionado")
-ax.grid(color="#2a3146", linestyle=":", linewidth=0.8, alpha=0.7)
+ax.axvline(preco, color="#c33d3d", linestyle="--", linewidth=1.4, label="Preço selecionado")
 
+# Estilo do gráfico (cores claras só dentro do gráfico)
+ax.grid(color="#2a3146", linestyle=":", linewidth=0.8, alpha=0.7)
 ax.set_xlabel("Preço (R$)", color="#cfd6e6")
 ax.set_ylabel("Quantidade Demandada", color="#cfd6e6")
-ax.set_title("Curvas de Demanda por Perfil", color="#ffffff", pad=10)
+ax.set_title("Curvas de Demanda por Perfil", color="#ffffff", pad=10, fontsize=18)
 ax.tick_params(colors="#cfd6e6")
 leg = ax.legend(facecolor="#1a1f2e", edgecolor="#2a3146")
 for text in leg.get_texts():
@@ -106,8 +86,8 @@ for text in leg.get_texts():
 
 st.pyplot(fig, use_container_width=True)
 
-# ======= TABELA =======
-st.markdown("### Quantidades e elasticidades no preço atual")
+# ======= TABELA (FUNDO BRANCO, TEXTO ESCURO) =======
+st.subheader("Quantidades e elasticidades no preço atual")
 linhas_tabela = []
 for nome, q, E, cor in linhas_info:
     linhas_tabela.append({
@@ -116,4 +96,17 @@ for nome, q, E, cor in linhas_info:
         "Elasticidade (E)": "-" if E is None else f"{E:.2f}",
         "Classificação": classifica_e(E)
     })
-st.dataframe(linhas_tabela, use_container_width=True)
+df = pd.DataFrame(linhas_tabela)
+st.dataframe(df, use_container_width=True)
+
+# ======= EXPLICAÇÃO DE USO DE IA (PROFESSOR PEDIU) =======
+with st.expander("Como usamos IA generativa neste artefato"):
+    st.markdown("""
+- **ChatGPT** foi usado para gerar o código base em **Python + Streamlit**, criar o gráfico com **Matplotlib**, 
+  calcular **elasticidade pontual** e estilizar a interface.
+- Iteramos prompts para:
+  - Exibir **todas as curvas** no mesmo gráfico, com marcadores no **preço selecionado**;
+  - Gerar **resumos automáticos** com quantidades e elasticidades;
+  - Ajustar o **layout** para boa leitura em projetor (gráfico escuro) e em áreas brancas (tabela e caixas com texto escuro).
+- O resultado é um **artefato interativo** que transforma o conceito de elasticidade-preço em uma ferramenta visual e funcional.
+""")

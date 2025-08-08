@@ -54,15 +54,12 @@ if st.sidebar.button("↺ Restaurar padrões"):
 
 # ------------------ FUNÇÕES ------------------
 def Q(a: float, b: float, p):
-    # aceita escalar ou array
-    return np.maximum(0.0, a - b * p)
+    return np.maximum(0.0, a - b * p)  # aceita escalar ou array
 
 def Q_raw(a: float, b: float, p):
-    # sem truncar abaixo de zero (pra desenhar trecho inviável)
-    return a - b * p
+    return a - b * p  # sem truncar (pra desenhar trecho inviável)
 
 def E_pontual(a: float, b: float, p: float):
-    """Elasticidade-preço pontual: E = (dQ/dP)*(P/Q) = (-b)*(P/Q)"""
     q = max(0.0, a - b * p)
     if q == 0:
         return None
@@ -77,8 +74,7 @@ def classif(E):
     return "unitária (=1)"
 
 def choke_price(a, b):
-    # preço de sufocamento: Q=0 -> a - bP = 0 -> P=a/b
-    return a / b
+    return a / b  # P* (Q=0)
 
 # ------------------ DADOS NO PREÇO ATUAL ------------------
 perfis = {
@@ -130,45 +126,62 @@ for col, (nome, q, E, cor, a, b, cp) in zip(cards, linhas):
 st.info(f"Preço selecionado: **R$ {preco}**")
 
 # ------------------ GRÁFICO DE CURVAS PRECISAS ------------------
-# Construir domínio dinâmico de P (pega do mínimo 0 até o maior choke price ou 110% do preço atual)
+# Domínio dinâmico de P
 min_p = 0
 max_cp = max(choke_price(a,b) for _,_,_,_,a,b,_ in linhas)
-max_p = max(max(100, preco*1.1), max_cp*1.05)  # estica um pouco pra ver interceptos
-P = np.linspace(min_p, max_p, 1000)
+max_p = max(max(100, preco*1.1), max_cp*1.05)
+P = np.linspace(min_p, max_p, 1200)
+
+# Padding para as anotações (evita sobreposição)
+max_q0 = max(a_est, a_emp, a_fam)
+y_pad_pt   = max_q0 * 0.025   # p/ texto do ponto atual
+y_pad_q0   = max_q0 * 0.035   # p/ Q(0)
+y_top_extra = max_q0 * 0.18   # aumenta espaço no topo
 
 fig, ax = plt.subplots(figsize=(9.8, 5.6))
 fig.patch.set_facecolor(COL_BG_DARK)
 ax.set_facecolor(COL_AX_DARK)
 
 for (nome, q_atual, E, cor, a, b, cp) in linhas:
-    # trecho inviável (Q<0): desenha pontilhado e opaco
     Q_raw_vals = Q_raw(a, b, P)
     mask_pos = Q_raw_vals >= 0
-    # desenha parte negativa (se existir)
+    # Parte inviável (Q<0) pontilhada
     if np.any(~mask_pos):
         ax.plot(P[~mask_pos], Q_raw_vals[~mask_pos],
                 color=cor, linewidth=1.3, linestyle=":", alpha=0.35, antialiased=True)
-    # desenha parte viável (Q>=0)
+    # Parte viável (Q>=0)
     ax.plot(P[mask_pos], Q_raw_vals[mask_pos],
             label=f"Demanda – {nome}", color=cor, linewidth=2.4, antialiased=True)
-    # marcador no ponto (preço atual, Q atual)
+    # Ponto no preço atual
     ax.scatter([preco], [q_atual], color=cor, s=70, zorder=5)
-    # anotação do valor
-    ax.text(preco, q_atual, f"  {q_atual:.1f}", color=COL_LABEL, va="center")
+    # Valor do ponto com offset e caixa
+    if q_atual > 0:
+        ax.text(preco, q_atual + y_pad_pt, f"{q_atual:.1f}",
+                color=COL_LABEL, va="bottom", ha="center", fontsize=10,
+                bbox=dict(facecolor=COL_BG_DARK, alpha=0.65, edgecolor="none", pad=1.5))
+    else:
+        # Se Q=0 no preço atual, escreve um pouco acima do eixo
+        ax.text(preco, 0 + y_pad_pt, f"{q_atual:.1f}",
+                color=COL_LABEL, va="bottom", ha="center", fontsize=10,
+                bbox=dict(facecolor=COL_BG_DARK, alpha=0.65, edgecolor="none", pad=1.5))
 
-# linha vertical do preço atual
+# Linha do preço atual
 ax.axvline(preco, color=COL_PRICE, linestyle="--", linewidth=1.5, label="Preço selecionado")
 
-# interceptos no gráfico (marquinhas)
+# Interceptos (com offset e caixa)
 for (nome, q_atual, E, cor, a, b, cp) in linhas:
     # Q(0)=a
-    ax.scatter([0], [a], color=cor, s=40)
-    ax.text(0, a, f"  Q(0)={a:.1f}", color=COL_LABEL, va="center")
-    # P* = a/b (choke price) no eixo X
-    ax.scatter([cp], [0], color=cor, s=40)
-    ax.text(cp, 0, f"  P*={cp:.1f}", color=COL_LABEL, va="bottom")
+    ax.scatter([0], [a], color=cor, s=40, zorder=4)
+    ax.text(0, a + y_pad_q0, f"Q(0)={a:.1f}",
+            color=COL_LABEL, va="bottom", ha="left", fontsize=10,
+            bbox=dict(facecolor=COL_BG_DARK, alpha=0.65, edgecolor="none", pad=1.5))
+    # P* = a/b
+    ax.scatter([cp], [0], color=cor, s=40, zorder=4)
+    ax.text(cp, 0 + y_pad_pt, f"P*={cp:.1f}",
+            color=COL_LABEL, va="bottom", ha="center", fontsize=10,
+            bbox=dict(facecolor=COL_BG_DARK, alpha=0.65, edgecolor="none", pad=1.5))
 
-# estilização geral
+# Estilo e limites
 ax.grid(color=COL_GRID, linestyle=":", linewidth=0.8, alpha=0.7)
 ax.set_xlabel("Preço (R$)", color=COL_LABEL)
 ax.set_ylabel("Quantidade Demandada", color=COL_LABEL)
@@ -176,15 +189,11 @@ ax.set_title("Curvas de Demanda por Perfil (alta resolução, interceptos e pont
              color=COL_TITLE, pad=10, fontsize=18)
 ax.tick_params(colors=COL_LABEL)
 
-# limites dinâmicos Y
-# pega maior Q(0) e ajusta um pouquinho pra cima
-max_q0 = max(a_est, a_emp, a_fam)
-ax.set_ylim(bottom=0, top=max(max_q0*1.15, 10))
-
-# limites X já ajustados no domínio
+# Limites Y com folga extra p/ anotações
+ax.set_ylim(bottom=0, top=max(max_q0 + y_top_extra, 10))
 ax.set_xlim(left=0, right=max_p)
 
-# legenda
+# Legenda
 leg = ax.legend(facecolor="#1a1f2e", edgecolor="#2a3146")
 for text in leg.get_texts():
     text.set_color("#e6e6e6")
@@ -213,7 +222,7 @@ st.dataframe(df, use_container_width=True)
 # ------------------ EXPLICANDO A IA ------------------
 with st.expander("Como usamos IA generativa neste artefato"):
     st.markdown("""
-- **ChatGPT** gerou e refinou o código em **Python + Streamlit**, incluindo o cálculo de **elasticidade pontual** e a **estilização**.
-- Iteramos prompts para aumentar a **precisão das curvas** (alta resolução), destacar **interceptos** (Q(0) e P*=a/b) e anotar o **ponto atual**.
-- O app final é um **artefato interativo** que conecta teoria à prática, com transparência nos parâmetros e leitura visual rápida.
+- **ChatGPT** ajudou a gerar/refinar o código em **Python + Streamlit**, calcular **elasticidade pontual** e ajustar o layout.
+- Melhorias de precisão: curvas com **alta resolução**, **interceptos** destacados, **offset** e **caixas** nas anotações para evitar sobreposição.
+- Resultado: leitura clara em projetor e valores sempre legíveis.
 """)

@@ -99,9 +99,8 @@ def narrativa(produto, preco, shock_label, series, p_star, r_star, r_atual):
 # ====================== CABEÇALHO / INSTRUÇÕES ======================
 st.markdown("### 🎯 Objetivo da atividade")
 st.write(
-    "Construímos um **artefato interativo** (simulador + jogo) para explorar **elasticidade-preço da demanda**. "
-    "Você ajusta **preço** e **cenário macro** e observa como **Estudante, Família e Empresa** reagem, além do "
-    "impacto na **receita agregada**. Abaixo, um **jogo** gamifica a busca pelo preço que **maximiza a receita**."
+    "Artefato interativo (simulador + jogo) para **elasticidade-preço**. "
+    "Ajuste **preço** e **cenário** e veja como Estudante, Família e Empresa reagem, com impacto na **receita**."
 )
 
 # ====================== CONTROLES GLOBAIS ======================
@@ -207,22 +206,26 @@ st.markdown("---")
 st.markdown("## 🎮 Jogo da Elasticidade-Preço")
 st.caption("Acerte o **preço que maximiza a receita agregada**. Você tem **3 tentativas**. Use dicas — mas sem entregar o ouro 😉.")
 
-# Estado inicial seguro (evita KeyError)
-if "game" not in st.session_state:
-    st.session_state.game = {
-        "iniciado": False,
-        "produto": None,
-        "cenario": None,
-        "shock": None,
-        "p_star": None,
-        "r_star": None,
-        "tentativas": 0,
-        "historico": [],     # (preco, receita, pct_max)
-        "faixa_lo": P_MIN,
-        "faixa_hi": P_MAX,
-        "usou_dica": False,
-    }
-G = st.session_state.game
+# Estado default seguro (sincroniza chaves, evitando KeyError entre versões)
+DEFAULT_GAME = {
+    "iniciado": False,
+    "produto": None,
+    "cenario": None,
+    "shock": None,
+    "p_star": None,
+    "r_star": None,
+    "tentativas": 0,
+    "historico": [],     # (preco, receita, pct_max)
+    "faixa_lo": P_MIN,
+    "faixa_hi": P_MAX,
+    "usou_dica": False,
+}
+G = st.session_state.get("game", {}).copy()
+# Preenche qualquer chave faltante
+for k, v in DEFAULT_GAME.items():
+    if k not in G:
+        G[k] = v
+st.session_state.game = G  # grava de volta sincronizado
 
 def melhor_preco(perfis, shock):
     return otimo_agregado(perfis, shock)
@@ -246,17 +249,19 @@ def faixa_texto(lo, hi, jitter=50):
 # Botões topo
 b1, b2, b3 = st.columns([1,1,1])
 with b1:
-    iniciar = st.button("▶️ Iniciar Jogo", type="primary", disabled=G["iniciado"])
+    iniciar = st.button("▶️ Iniciar Jogo", type="primary", disabled=G.get("iniciado", False))
 with b2:
-    dica_btn = st.button("🎁 Dica única", disabled=(not G["iniciado"]) or G["usou_dica"] or (G["p_star"] is None))
+    dica_btn = st.button(
+        "🎁 Dica única",
+        disabled=(not G.get("iniciado", False)) or G.get("usou_dica", False) or (G.get("p_star") is None)
+    )
 with b3:
-    reiniciar = st.button("🔁 Reiniciar", disabled=not G["iniciado"])
+    reiniciar = st.button("🔁 Reiniciar", disabled=not G.get("iniciado", False))
 
 if reiniciar:
-    st.session_state.pop("game", None)
+    st.session_state.game = DEFAULT_GAME.copy()
     st.rerun()
 
-# Preparação do jogo
 if iniciar:
     produtos_jogo = {prod: {k: {"a": v["a"], "b": v["b"]} for k, v in perfis.items()} for prod, perfis in PRODUTOS.items()}
     G["produto"] = random.choice(list(produtos_jogo.keys()))
@@ -268,31 +273,32 @@ if iniciar:
     G["historico"] = []
     G["faixa_lo"], G["faixa_hi"] = P_MIN, P_MAX
     G["usou_dica"] = False
+    st.session_state.game = G
     st.rerun()
 
-# Dica única (segura mesmo se clicarem fora de hora)
-if dica_btn and G["iniciado"] and (not G["usou_dica"]) and (G["p_star"] is not None):
+if dica_btn and G.get("iniciado", False) and (not G.get("usou_dica", False)) and (G.get("p_star") is not None):
     largura = random.choice([500, 600, 700, 800])
     lo = max(P_MIN, G["p_star"] - largura//2)
     hi = min(P_MAX, G["p_star"] + largura//2)
     st.info(f"💡 **Dica:** o preço ótimo está **aproximadamente** entre **{faixa_texto(lo, hi, jitter=0)}**.")
     G["usou_dica"] = True
+    st.session_state.game = G
 
-if G["iniciado"]:
-    st.markdown(f"**Produto:** {G['produto']}  |  **Cenário:** {G['cenario']}")
+if G.get("iniciado", False):
+    st.markdown(f"**Produto:** {G.get('produto')}  |  **Cenário:** {G.get('cenario')}")
     preco_try = st.number_input("💰 Seu chute (R$)", min_value=P_MIN, max_value=P_MAX, step=P_STEP)
 
     if st.button("Chutar preço"):
-        # Proteção extra contra estado incompleto
-        if G["p_star"] is None or G["r_star"] is None:
-            st.error("Erro de estado do jogo. Clique em **Reiniciar** e depois em **Iniciar Jogo**.")
+        # Segurança extra
+        if (G.get("p_star") is None) or (G.get("r_star") is None):
+            st.error("Estado do jogo incompleto. Clique em **Reiniciar** e depois em **Iniciar Jogo**.")
         else:
             produtos_jogo = {prod: {k: {"a": v["a"], "b": v["b"]} for k, v in perfis.items()} for prod, perfis in PRODUTOS.items()}
             perfis_escolhido = produtos_jogo[G["produto"]]
             r = receita_agregada(perfis_escolhido, preco_try, G["shock"])
             pct = (r / G["r_star"]) if G["r_star"] else 0.0
 
-            G["tentativas"] += 1
+            G["tentativas"] = G.get("tentativas", 0) + 1
             G["historico"].append((preco_try, int(r), pct))
 
             dist = abs(preco_try - G["p_star"])
@@ -326,8 +332,10 @@ if G["iniciado"]:
                 st.caption("Nota: na demanda linear agregada, a receita maximiza no ponto de **elasticidade unitária agregada**.")
                 G["iniciado"] = False
 
+            st.session_state.game = G  # persistir mudanças
+
     # Histórico
-    if G["historico"]:
+    if G.get("historico"):
         st.subheader("📜 Histórico de tentativas")
         hist = pd.DataFrame(G["historico"], columns=["Preço", "Receita", "% da Máxima"])
         hist["% da Máxima"] = (hist["% da Máxima"]*100).round(1).astype(str) + "%"
@@ -336,12 +344,8 @@ if G["iniciado"]:
 # ====================== COMO USAMOS IA (PROF) ======================
 with st.expander("📌 Como usamos IA generativa neste artefato"):
     st.markdown("""
-- **Conceito escolhido:** *Elasticidade-preço da demanda* (apostila, seção 2.1).  
-- **Uso da IA:** O ChatGPT ajudou a (i) estruturar o modelo (demanda linear por perfil), 
-  (ii) implementar **otimização analítica** do preço ótimo agregado \\(P^* = \\tfrac{s\\sum a_i}{2\\sum b_i}\\), 
-  (iii) criar a interface **Streamlit** (gráficos, KPIs, narrativa automática), e 
-  (iv) desenhar um **jogo** com dicas (quente/morno/frio, % da máxima, tendência local e faixa provável).
-- **Aplicação prática:** O simulador permite **calibrar cenários macro**, visualizar **pontos de elasticidade unitária** por perfil e agregado, 
-  e entender como **mudanças de preço** afetam **quantidade** e **receita**. O jogo reforça o aprendizado de forma interativa.
-- **Autores:** o grupo utilizará fotos dos integrantes no dia da apresentação como comprovação de autoria.
+- **Conceito:** *Elasticidade-preço da demanda* (apostila, seção 2.1).  
+- **Uso da IA:** O ChatGPT ajudou a projetar o modelo (demanda linear por perfil), implementar a **otimização analítica** do preço ótimo agregado \\(P^* = \\tfrac{s\\sum a_i}{2\\sum b_i}\\), construir o **dashboard** em Streamlit e criar o **jogo** com dicas progressivas.
+- **Aplicação:** Ajustando **preço** e **cenário**, visualizamos **quantidade**, **elasticidade** e **receita** por perfil e agregada; o **jogo** reforça o entendimento do ponto de **elasticidade unitária (receita máxima)**.
+- **Comprovação:** cada integrante fará a postagem com foto no dia da apresentação.
 """)
